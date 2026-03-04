@@ -1,0 +1,22 @@
+{
+  "name": "HTML (Packages)",
+  "description": null,
+  "version": 1,
+  "date": "2025-02-20T18:13:33.1939877+01:00",
+  "readOnly": true,
+  "inheritFrom": "HTMLStatic",
+  "needsDataPath": true,
+  "entryPath": "site/index.html",
+  "moveFiles": [
+    "favicon.ico>site/favicon.ico",
+    "site/packages.html>site/index.html"
+  ],
+  "deleteFiles": [
+    "index.html",
+    "site/js/search.js",
+    "site/data/files.json"
+  ],
+  "parameters": [
+    "index.html"
+  ]
+}

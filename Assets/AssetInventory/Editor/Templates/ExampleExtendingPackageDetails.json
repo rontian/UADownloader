@@ -1,0 +1,18 @@
+{
+  "name": "Example: Extending Package Details",
+  "description": null,
+  "version": 1,
+  "date": "2025-03-31T18:20:05.0527896+02:00",
+  "readOnly": false,
+  "isSample": true,
+  "fixedTargetFolder": false,
+  "needsDataPath": true,
+  "needsImagePath": false,
+  "packageFields": [
+    "PurchaseDate"
+  ],
+  "fileFields": null,
+  "inheritFrom": "HTMLStaticPackages",
+  "moveFiles": null,
+  "deleteFiles": null
+}
