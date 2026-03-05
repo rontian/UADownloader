@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
 using AssetInventory;
+using UADownloader.Filters;
 
 namespace UADownloader
 {
@@ -52,6 +53,10 @@ namespace UADownloader
         private DateTime _downloadStartTime;
         private long _totalDownloadedSize;
         private int _skippedCount;
+        
+        private FilterManager _filterManager;
+        private int _filteredCount;
+        private bool _filterFoldout = true;
 
         private void OnEnable()
         {
@@ -59,6 +64,11 @@ namespace UADownloader
             LoadExportPath();
             LoadPackageList();
             LoadDownloadIndex();
+            
+            if (!string.IsNullOrEmpty(_exportPath))
+            {
+                _filterManager = new FilterManager(_exportPath);
+            }
         }
 
         private void OnDisable()
@@ -73,6 +83,9 @@ namespace UADownloader
             EditorGUILayout.Space(10);
 
             DrawExportPathSection();
+            EditorGUILayout.Space(10);
+
+            DrawFilterSection();
             EditorGUILayout.Space(10);
 
             DrawOverviewSection();
@@ -112,12 +125,14 @@ namespace UADownloader
             int totalCount = _packageList?.packages?.Count ?? 0;
             int downloadedCount = _downloadIndex?.downloaded?.Count ?? 0;
             int failedCount = _downloadIndex?.failed?.Count ?? 0;
-            int remainingCount = totalCount - downloadedCount - failedCount;
+            int filteredCount = _filterManager?.GetFilteredCount() ?? 0;
+            int remainingCount = totalCount - downloadedCount - failedCount - filteredCount;
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField($"资源包总数: {totalCount}", GUILayout.Width(150));
             EditorGUILayout.LabelField($"已下载: {downloadedCount}", GUILayout.Width(150));
             EditorGUILayout.LabelField($"失败: {failedCount}", GUILayout.Width(150));
+            EditorGUILayout.LabelField($"已过滤: {filteredCount}", GUILayout.Width(150));
             EditorGUILayout.LabelField($"待下载: {remainingCount}");
             EditorGUILayout.EndHorizontal();
 
@@ -215,20 +230,62 @@ namespace UADownloader
                 
                 TimeSpan elapsed = DateTime.Now - _downloadStartTime;
                 string elapsedStr = FormatDuration(elapsed.TotalSeconds);
-                string totalSizeStr = FormatBytes(_totalDownloadedSize);
-                int failedCount = _downloadIndex?.failed?.Count ?? 0;
-                
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField($"已下载: {downloadedCount}个", GUILayout.Width(150));
-                EditorGUILayout.LabelField($"失败: {failedCount}个", GUILayout.Width(100));
-                EditorGUILayout.LabelField($"跳过: {_skippedCount}个", GUILayout.Width(100));
-                EditorGUILayout.EndHorizontal();
-                
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField($"总大小: {totalSizeStr}", GUILayout.Width(200));
-                EditorGUILayout.LabelField($"总耗时: {elapsedStr}", GUILayout.Width(200));
-                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.LabelField($"已用时间: {elapsedStr}");
             }
+        }
+
+        private void DrawFilterSection()
+        {
+            _filterFoldout = EditorGUILayout.Foldout(_filterFoldout, "过滤器设置", true, EditorStyles.foldoutHeader);
+            if (!_filterFoldout) return;
+            
+            EditorGUILayout.BeginVertical("box");
+            
+            if (GUILayout.Button("+ 添加过滤器", GUILayout.Height(25)))
+            {
+                FilterSelectionWindow.ShowWindow(_exportPath, filter =>
+                {
+                    _filterManager?.AddFilter(filter);
+                    Repaint();
+                });
+            }
+            
+            EditorGUILayout.Space(5);
+            
+            var activeFilters = _filterManager?.GetActiveFilters() ?? new List<IPackageFilter>();
+            if (activeFilters.Count == 0)
+            {
+                EditorGUILayout.LabelField("暂无激活的过滤器", EditorStyles.centeredGreyMiniLabel);
+            }
+            else
+            {
+                foreach (var filter in activeFilters)
+                {
+                    EditorGUILayout.BeginHorizontal("box");
+                    
+                    EditorGUILayout.LabelField("✓", GUILayout.Width(20));
+                    EditorGUILayout.LabelField(filter.GetName(), EditorStyles.boldLabel, GUILayout.Width(150));
+                    
+                    var paramDict = filter.GetParams();
+                    if (paramDict.Count > 0)
+                    {
+                        string paramStr = string.Join(", ", paramDict.Select(kv => $"{kv.Key}={kv.Value}"));
+                        EditorGUILayout.LabelField($"({paramStr})", GUILayout.Width(200));
+                    }
+                    
+                    EditorGUILayout.LabelField(filter.GetDescription(), EditorStyles.wordWrappedMiniLabel);
+                    
+                    if (GUILayout.Button("×", GUILayout.Width(25)))
+                    {
+                        _filterManager?.RemoveFilter(filter);
+                        Repaint();
+                    }
+                    
+                    EditorGUILayout.EndHorizontal();
+                }
+            }
+            
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawPackageList()
@@ -377,6 +434,7 @@ namespace UADownloader
             _downloadStartTime = DateTime.Now;
             _totalDownloadedSize = 0;
             _skippedCount = 0;
+            _filteredCount = 0;
 
             string unityCachePath = AI.GetAssetCacheFolder();
             SaveDownloadIndex();
@@ -386,7 +444,7 @@ namespace UADownloader
                 if (_downloadCts.Token.IsCancellationRequested)
                 {
                     Debug.Log("[BatchDownloader] 下载已取消");
-                    break;
+                    return;
                 }
 
                 var package = _packageList.packages[i];
@@ -416,6 +474,25 @@ namespace UADownloader
                     Debug.LogWarning($"[BatchDownloader] 详情获取失败: {package.name}");
                 }
 
+                if (_filterManager != null && _filterManager.ShouldFilter(package, out string filterName, out string filterReason))
+                {
+                    Debug.Log($"[BatchDownloader] 已过滤: {package.name} - 过滤器:{filterName}, 理由:{filterReason}");
+                    
+                    if (!_downloadIndex.downloaded.Contains(package.id))
+                    {
+                        _downloadIndex.downloaded.Add(package.id);
+                        if (!string.IsNullOrEmpty(package.version))
+                        {
+                            _downloadIndex.downloadedVersions[package.id] = package.version;
+                        }
+                    }
+                    
+                    _filteredCount++;
+                    SaveDownloadIndex();
+                    Repaint();
+                    continue;
+                }
+
                 var downloadInfo = await AssetStoreAPI.FetchDownloadInfoAsync(package.id);
                 if (downloadInfo != null)
                 {
@@ -432,6 +509,10 @@ namespace UADownloader
                         if (!_downloadIndex.downloaded.Contains(package.id))
                         {
                             _downloadIndex.downloaded.Add(package.id);
+                            if (!string.IsNullOrEmpty(package.version))
+                            {
+                                _downloadIndex.downloadedVersions[package.id] = package.version;
+                            }
                         }
                         
                         SaveDownloadIndex();
@@ -463,11 +544,13 @@ namespace UADownloader
             _currentState = UIState.Ready;
             _currentDownloadingIndex = -1;
             
+            ArchiveIndexMove();
+            
             TimeSpan elapsed = DateTime.Now - _downloadStartTime;
             string elapsedStr = FormatDuration(elapsed.TotalSeconds);
             string totalSizeStr = FormatBytes(_totalDownloadedSize);
             
-            _statusMessage = $"批量下载完成 | 成功:{_downloadIndex.downloaded.Count} | 失败:{_downloadIndex.failed.Count} | 跳过:{_skippedCount} | 总大小:{totalSizeStr} | 总耗时:{elapsedStr}";
+            _statusMessage = $"批量下载完成 | 成功:{_downloadIndex.downloaded.Count} | 失败:{_downloadIndex.failed.Count} | 跳过:{_skippedCount} | 过滤:{_filteredCount} | 总大小:{totalSizeStr} | 总耗时:{elapsedStr}";
             Debug.Log($"[BatchDownloader] {_statusMessage}");
             Repaint();
         }
@@ -478,17 +561,20 @@ namespace UADownloader
             _currentState = UIState.Paused;
             _statusMessage = "已暂停下载";
             SaveDownloadIndex();
+            ArchiveIndexCopy();
             Repaint();
         }
 
         private void CancelDownload()
         {
             _downloadCts?.Cancel();
+            
+            ArchiveIndexMove();
+            
             _downloadIndex = null;
-            DeleteDownloadIndex();
             _currentState = UIState.Ready;
             _currentDownloadingIndex = -1;
-            _statusMessage = "已取消下载";
+            _statusMessage = "已取消下载（已保存下载记录）";
             Repaint();
         }
 
@@ -507,6 +593,13 @@ namespace UADownloader
             if (_downloadIndex != null && !_downloadIndex.downloaded.Contains(id))
             {
                 _downloadIndex.downloaded.Add(id);
+                
+                var package = _packageList?.packages?.Find(p => p.id == id);
+                if (package != null && !string.IsNullOrEmpty(package.version))
+                {
+                    _downloadIndex.downloadedVersions[id] = package.version;
+                }
+                
                 _downloadIndex.lastUpdate = DateTime.Now.ToString("o");
             }
         }
@@ -617,6 +710,65 @@ namespace UADownloader
             catch (Exception e)
             {
                 Debug.LogError($"删除index.json失败: {e.Message}");
+            }
+        }
+
+        private void ArchiveIndexCopy()
+        {
+            if (string.IsNullOrEmpty(_exportPath)) return;
+
+            string indexPath = Path.Combine(_exportPath, "index.json");
+            if (!File.Exists(indexPath))
+            {
+                Debug.LogWarning("[BatchDownloader] 归档失败: index.json 不存在");
+                return;
+            }
+
+            try
+            {
+                string historyDir = Path.Combine(_exportPath, "history_indexes");
+                Directory.CreateDirectory(historyDir);
+                
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string archivePath = Path.Combine(historyDir, $"index_{timestamp}.json");
+                
+                File.Copy(indexPath, archivePath, overwrite: false);
+                Debug.Log($"[BatchDownloader] 已复制下载索引到历史: index_{timestamp}.json");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[BatchDownloader] 复制index.json到历史失败: {e.Message}");
+            }
+        }
+
+        private void ArchiveIndexMove()
+        {
+            if (string.IsNullOrEmpty(_exportPath)) return;
+
+            string indexPath = Path.Combine(_exportPath, "index.json");
+            if (!File.Exists(indexPath))
+            {
+                Debug.LogWarning("[BatchDownloader] 归档失败: index.json 不存在");
+                return;
+            }
+
+            try
+            {
+                string historyDir = Path.Combine(_exportPath, "history_indexes");
+                Directory.CreateDirectory(historyDir);
+                
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string archivePath = Path.Combine(historyDir, $"index_{timestamp}.json");
+                
+                File.Copy(indexPath, archivePath, overwrite: false);
+                Debug.Log($"[BatchDownloader] 已归档下载索引: index_{timestamp}.json");
+                
+                File.Delete(indexPath);
+                Debug.Log("[BatchDownloader] 已删除当前index.json");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[BatchDownloader] 归档并删除index.json失败: {e.Message}");
             }
         }
 

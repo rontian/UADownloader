@@ -51,6 +51,7 @@ namespace UADownloader
         public int currentIndex;
         public int totalCount;
         public List<int> downloaded = new List<int>();
+        public Dictionary<int, string> downloadedVersions = new Dictionary<int, string>();  // 记录已下载资源包的版本号
         public List<int> failed = new List<int>();
         public string lastUpdate;
         public string currentDownloadingId;  // 当前正在下载的包ID
