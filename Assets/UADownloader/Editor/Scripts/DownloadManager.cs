@@ -69,6 +69,14 @@ namespace UADownloader
                 {
                     Debug.LogWarning($"[DownloadManager] 第 {attempt} 次尝试失败: {e.Message}");
                     
+                    if (e.Message.Contains("is not a valid directory name") || 
+                        e.Message.Contains("Illegal characters in path"))
+                    {
+                        Debug.LogError($"[DownloadManager] 发布商/分类名称包含非法字符，无法下载: {package.name} (Publisher: {package.publisher})");
+                        OnFailed?.Invoke(package.id, "发布商/分类名称包含非法字符");
+                        return false;
+                    }
+                    
                     if (attempt == MAX_RETRY_COUNT)
                     {
                         Debug.LogError($"[DownloadManager] 下载异常，已重试 {MAX_RETRY_COUNT} 次: {package.name} - {e.Message}");
@@ -93,9 +101,18 @@ namespace UADownloader
                     return false;
                 }
 
-                string safePublisher = SanitizeFileName(downloadInfo.filename_safe_publisher_name ?? package.publisher);
-                string safeCategory = SanitizeFileName(downloadInfo.filename_safe_category_name ?? package.category);
-                string safeName = SanitizeFileName(downloadInfo.filename_safe_package_name ?? package.name);
+                // 优先使用API返回的safe字段（已经过服务器安全处理），仅在缺失时才用SanitizeFileName()
+                string safePublisher = !string.IsNullOrEmpty(downloadInfo.filename_safe_publisher_name)
+                    ? downloadInfo.filename_safe_publisher_name
+                    : SanitizeFileName(package.publisher);
+                    
+                string safeCategory = !string.IsNullOrEmpty(downloadInfo.filename_safe_category_name)
+                    ? downloadInfo.filename_safe_category_name
+                    : SanitizeFileName(package.category);
+                    
+                string safeName = !string.IsNullOrEmpty(downloadInfo.filename_safe_package_name)
+                    ? downloadInfo.filename_safe_package_name
+                    : SanitizeFileName(package.name);
 
                 string expectedPath = Path.Combine(unityCachePath, safePublisher, safeCategory, $"{safeName}.unitypackage");
 
@@ -104,6 +121,21 @@ namespace UADownloader
                     await CopyToExportAsync(expectedPath, safeName, package.version);
                     OnCompleted?.Invoke(package.id, package.name);
                     return true;
+                }
+
+                try
+                {
+                    string categoryDir = Path.Combine(unityCachePath, safePublisher, safeCategory);
+                    if (!Directory.Exists(categoryDir))
+                    {
+                        Directory.CreateDirectory(categoryDir);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[DownloadManager] 创建缓存目录失败: {package.name} (Publisher: {package.publisher})\n错误: {e.Message}");
+                    OnFailed?.Invoke(package.id, $"无法创建缓存目录 (发布商名称包含非法字符)");
+                    return false;
                 }
 
                 bool downloadSuccess = await StartUnityDownloadAsync(
@@ -412,7 +444,18 @@ namespace UADownloader
             {
                 fileName = fileName.Replace(c, '_');
             }
-            return fileName;
+            
+            fileName = fileName.Replace('.', '_');
+            fileName = fileName.Replace(',', '_');
+            fileName = fileName.Replace(';', '_');
+            fileName = fileName.Replace(':', '_');
+            
+            if (fileName.Length > 200)
+            {
+                fileName = fileName.Substring(0, 200);
+            }
+            
+            return fileName.Trim();
         }
     }
 }

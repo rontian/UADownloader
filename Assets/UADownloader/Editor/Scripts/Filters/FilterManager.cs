@@ -44,6 +44,11 @@ namespace UADownloader.Filters
             return new List<IPackageFilter>(_activeFilters);
         }
         
+        public List<IPackageFilter> GetFilters()
+        {
+            return _activeFilters;
+        }
+        
         public bool ShouldFilter(UADownloader.PackageInfo package, out string filterName, out string filterReason)
         {
             foreach (var filter in _activeFilters)

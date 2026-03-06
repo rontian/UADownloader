@@ -203,10 +203,20 @@ namespace UADownloader
                 {
                     var download = result.result.download;
                     
+                    // 统一对三个safe字段做最小处理（仅删除点号，与AssetInventory一致）
+                    if (!string.IsNullOrEmpty(download.filename_safe_publisher_name))
+                    {
+                        download.filename_safe_publisher_name = download.filename_safe_publisher_name.Replace(".", string.Empty);
+                    }
+                    if (!string.IsNullOrEmpty(download.filename_safe_category_name))
+                    {
+                        download.filename_safe_category_name = download.filename_safe_category_name.Replace(".", string.Empty);
+                    }
                     if (!string.IsNullOrEmpty(download.filename_safe_package_name))
                     {
-                        download.filename_safe_package_name = download.filename_safe_package_name.Replace(".", "_");
+                        download.filename_safe_package_name = download.filename_safe_package_name.Replace(".", string.Empty);
                     }
+                    
                     return download;
                 }
                 else

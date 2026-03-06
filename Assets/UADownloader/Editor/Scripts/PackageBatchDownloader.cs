@@ -68,6 +68,29 @@ namespace UADownloader
             if (!string.IsNullOrEmpty(_exportPath))
             {
                 _filterManager = new FilterManager(_exportPath);
+                InitializeDefaultFilters();
+            }
+        }
+        
+        private void InitializeDefaultFilters()
+        {
+            if (_filterManager == null) return;
+            
+            bool hasDownloadedFilter = false;
+            foreach (var filter in _filterManager.GetActiveFilters())
+            {
+                if (filter is DownloadedFilter)
+                {
+                    hasDownloadedFilter = true;
+                    break;
+                }
+            }
+            
+            if (!hasDownloadedFilter)
+            {
+                var downloadedFilter = new DownloadedFilter(_exportPath);
+                _filterManager.AddFilter(downloadedFilter);
+                Debug.Log("[BatchDownloader] 已自动启用历史下载过滤器");
             }
         }
 
@@ -113,6 +136,9 @@ namespace UADownloader
                 {
                     _exportPath = selected;
                     SaveExportPath();
+                    
+                    _filterManager = new FilterManager(_exportPath);
+                    InitializeDefaultFilters();
                 }
             }
             EditorGUILayout.EndHorizontal();
