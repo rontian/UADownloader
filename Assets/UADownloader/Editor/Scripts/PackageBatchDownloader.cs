@@ -35,20 +35,24 @@ namespace UADownloader
         }
 
         [SerializeField] private string _exportPath;
+        [SerializeField] private bool _downloadImagesOnly;
         
         private UIState _currentState = UIState.Idle;
         private PackageList _packageList;
         private DownloadIndex _downloadIndex;
         private DownloadManager _downloadManager;
+        private ImageDownloader _imageDownloader;
         private CancellationTokenSource _downloadCts;
         private Vector2 _scrollPos;
         private string _statusMessage;
         private int _currentDownloadingIndex = -1;
+        private int _lastScrolledIndex = -1;
         private string _currentDownloadingName;
         private float _currentProgress;
         private long _currentDownloadedBytes;
         private long _currentTotalBytes;
         private double _currentSpeedBps;
+        private float _measuredItemHeight = -1f;
         
         private DateTime _downloadStartTime;
         private long _totalDownloadedSize;
@@ -142,6 +146,20 @@ namespace UADownloader
                 }
             }
             EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.Space(10);
+            
+            Color originalBgColor = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(0.7f, 0.9f, 1.0f, 0.3f);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            GUI.backgroundColor = originalBgColor;
+            
+            EditorGUILayout.LabelField("功能选项", EditorStyles.boldLabel);
+            EditorGUILayout.Space(3);
+            
+            _downloadImagesOnly = EditorGUILayout.ToggleLeft("  仅下载资源图片", _downloadImagesOnly);
+            
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawOverviewSection()
@@ -316,19 +334,49 @@ namespace UADownloader
 
         private void DrawPackageList()
         {
-            if (_packageList?.packages == null || _packageList.packages.Count == 0)
+            if (_packageList == null || _packageList.packages == null || _packageList.packages.Count == 0)
             {
+                EditorGUILayout.HelpBox("无资源包数据", MessageType.Info);
                 return;
             }
 
-            EditorGUILayout.LabelField("资源包列表", EditorStyles.boldLabel);
-            _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos);
+            EditorGUILayout.LabelField($"资源列表 ({_packageList.packages.Count} 个资源包)", EditorStyles.boldLabel);
+
+            const float scrollViewHeight = 300f;
+            const int visibleItemCount = 11;
+            const int centerOffset = 5;
+            
+            if (_currentDownloadingIndex >= 0 && _lastScrolledIndex != _currentDownloadingIndex)
+            {
+                _lastScrolledIndex = _currentDownloadingIndex;
+                
+                if (_measuredItemHeight > 0)
+                {
+                    int targetScrollIndex = Mathf.Max(0, _currentDownloadingIndex - centerOffset);
+                    float targetScrollY = targetScrollIndex * _measuredItemHeight;
+                    
+                    float totalContentHeight = _packageList.packages.Count * _measuredItemHeight;
+                    float maxScrollY = Mathf.Max(0, totalContentHeight - scrollViewHeight);
+                    
+                    _scrollPos.y = Mathf.Clamp(targetScrollY, 0, maxScrollY);
+                    
+                    Debug.Log($"[Scroll] 滚动到索引 {_currentDownloadingIndex}，" +
+                              $"目标滚动索引={targetScrollIndex}，" +
+                              $"滚动位置={_scrollPos.y:F1}，" +
+                              $"item高度={_measuredItemHeight:F1}px，" +
+                              $"总高度={totalContentHeight:F1}，" +
+                              $"最大滚动={maxScrollY:F1}");
+                }
+                
+                Repaint();
+            }
+            
+            _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.Height(scrollViewHeight));
 
             for (int i = 0; i < _packageList.packages.Count; i++)
             {
                 var package = _packageList.packages[i];
-                
-                bool isDownloading = (_currentState == UIState.Downloading && _currentDownloadingIndex == i);
+                bool isDownloading = _currentDownloadingIndex == i;
                 bool isDownloaded = _downloadIndex?.downloaded?.Contains(package.id) ?? false;
                 bool isFailed = _downloadIndex?.failed?.Contains(package.id) ?? false;
 
@@ -340,7 +388,8 @@ namespace UADownloader
                     boxStyle.normal.background = MakeTex(2, 2, new Color(0.3f, 0.5f, 0.8f, 0.3f));
                 }
                 
-                EditorGUILayout.BeginHorizontal(boxStyle);
+                const float estimatedItemHeight = 22f;
+                EditorGUILayout.BeginHorizontal(boxStyle, GUILayout.Height(estimatedItemHeight));
 
                 if (isDownloading)
                 {
@@ -386,6 +435,27 @@ namespace UADownloader
                 GUI.color = Color.white;
 
                 EditorGUILayout.EndHorizontal();
+                
+                if (_measuredItemHeight < 0 && Event.current.type == EventType.Repaint)
+                {
+                    Rect lastRect = GUILayoutUtility.GetLastRect();
+                    if (lastRect.height > 0)
+                    {
+                        float rawHeight = lastRect.height;
+                        _measuredItemHeight = rawHeight + 4f;
+                        Debug.Log($"[Scroll] 测量到的实际item高度: {rawHeight:F1}px，补偿后: {_measuredItemHeight:F1}px (预设:{estimatedItemHeight}px)");
+                        
+                        if (_currentDownloadingIndex >= 0)
+                        {
+                            int targetScrollIndex = Mathf.Max(0, _currentDownloadingIndex - centerOffset);
+                            float targetScrollY = targetScrollIndex * _measuredItemHeight;
+                            float totalContentHeight = _packageList.packages.Count * _measuredItemHeight;
+                            float maxScrollY = Mathf.Max(0, totalContentHeight - scrollViewHeight);
+                            _scrollPos.y = Mathf.Clamp(targetScrollY, 0, maxScrollY);
+                            Repaint();
+                        }
+                    }
+                }
             }
 
             EditorGUILayout.EndScrollView();
@@ -456,6 +526,12 @@ namespace UADownloader
             _downloadManager.OnCompleted += OnDownloadCompleted;
             _downloadManager.OnFailed += OnDownloadFailed;
             _downloadManager.StartDownload(_downloadCts);
+            
+            _imageDownloader = new ImageDownloader(_exportPath);
+            _imageDownloader.OnProgress += OnDownloadProgress;
+            _imageDownloader.OnCompleted += OnDownloadCompleted;
+            _imageDownloader.OnFailed += OnDownloadFailed;
+            _imageDownloader.StartDownload(_downloadCts);
 
             _downloadStartTime = DateTime.Now;
             _totalDownloadedSize = 0;
@@ -463,9 +539,15 @@ namespace UADownloader
             _filteredCount = 0;
 
             string unityCachePath = AI.GetAssetCacheFolder();
-            SaveDownloadIndex();
+            
+            if (!_downloadImagesOnly)
+            {
+                SaveDownloadIndex();
+            }
 
-            for (int i = _downloadIndex.currentIndex; i < _packageList.packages.Count; i++)
+            int startIndex = _downloadImagesOnly ? 0 : _downloadIndex.currentIndex;
+
+            for (int i = startIndex; i < _packageList.packages.Count; i++)
             {
                 if (_downloadCts.Token.IsCancellationRequested)
                 {
@@ -475,7 +557,7 @@ namespace UADownloader
 
                 var package = _packageList.packages[i];
                 
-                if (_downloadIndex.downloaded.Contains(package.id))
+                if (!_downloadImagesOnly && _downloadIndex.downloaded.Contains(package.id))
                 {
                     Debug.Log($"[BatchDownloader] 跳过已下载: {package.name} (ID:{package.id})");
                     continue;
@@ -485,9 +567,14 @@ namespace UADownloader
 
                 _currentDownloadingIndex = i;
                 _currentDownloadingName = package.name;
-                _downloadIndex.currentIndex = i;
-                _downloadIndex.currentDownloadingId = package.id.ToString();
-                SaveDownloadIndex();
+                
+                if (!_downloadImagesOnly)
+                {
+                    _downloadIndex.currentIndex = i;
+                    _downloadIndex.currentDownloadingId = package.id.ToString();
+                    SaveDownloadIndex();
+                }
+                
                 Repaint();
 
                 bool detailsFetched = await AssetStoreAPI.FetchAssetDetailsAsync(package);
@@ -498,6 +585,23 @@ namespace UADownloader
                 else
                 {
                     Debug.LogWarning($"[BatchDownloader] 详情获取失败: {package.name}");
+                }
+
+                if (package.images != null && package.images.Length > 0)
+                {
+                    Debug.Log($"[BatchDownloader] 开始下载资源图片: {package.name}");
+                    await _imageDownloader.DownloadImagesAsync(package);
+                }
+                else
+                {
+                    Debug.Log($"[BatchDownloader] 资源包没有图片: {package.name}");
+                }
+                
+                if (_downloadImagesOnly)
+                {
+                    Debug.Log($"[BatchDownloader] 仅下载图片模式，跳过资源包下载: {package.name}");
+                    Repaint();
+                    continue;
                 }
 
                 if (_filterManager != null && _filterManager.ShouldFilter(package, out string filterName, out string filterReason))
@@ -569,6 +673,8 @@ namespace UADownloader
 
             _currentState = UIState.Ready;
             _currentDownloadingIndex = -1;
+            _lastScrolledIndex = -1;
+            _scrollPos = Vector2.zero;
             
             ArchiveIndexMove();
             
@@ -600,6 +706,8 @@ namespace UADownloader
             _downloadIndex = null;
             _currentState = UIState.Ready;
             _currentDownloadingIndex = -1;
+            _lastScrolledIndex = -1;
+            _scrollPos = Vector2.zero;
             _statusMessage = "已取消下载（已保存下载记录）";
             Repaint();
         }
@@ -672,6 +780,11 @@ namespace UADownloader
         {
             if (string.IsNullOrEmpty(_exportPath) || _packageList == null) return;
 
+            if (!EnsureExportDirectoryExists())
+            {
+                return;
+            }
+
             string packagesPath = Path.Combine(_exportPath, "packages.json");
             try
             {
@@ -681,6 +794,25 @@ namespace UADownloader
             catch (Exception e)
             {
                 Debug.LogError($"保存packages.json失败: {e.Message}");
+            }
+        }
+        
+        private bool EnsureExportDirectoryExists()
+        {
+            if (Directory.Exists(_exportPath))
+            {
+                return true;
+            }
+            
+            try
+            {
+                Directory.CreateDirectory(_exportPath);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"创建导出目录失败: {e.Message}");
+                return false;
             }
         }
 
@@ -707,6 +839,11 @@ namespace UADownloader
         private void SaveDownloadIndex()
         {
             if (string.IsNullOrEmpty(_exportPath) || _downloadIndex == null) return;
+
+            if (!EnsureExportDirectoryExists())
+            {
+                return;
+            }
 
             string indexPath = Path.Combine(_exportPath, "index.json");
             try
@@ -841,6 +978,7 @@ namespace UADownloader
             }
             
             Texture2D texture = new Texture2D(width, height);
+            texture.hideFlags = HideFlags.DontSave;
             texture.SetPixels(pixels);
             texture.Apply();
             return texture;

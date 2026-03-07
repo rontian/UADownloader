@@ -31,6 +31,21 @@ namespace UADownloader
         public string slug;
         public int revision;
         public string publishedDate;
+        public ImageInfo[] images;
+    }
+    
+    /// <summary>
+    /// 资源图片信息
+    /// </summary>
+    [Serializable]
+    public class ImageInfo
+    {
+        public string imageUrl;
+        public string webpUrl;
+        public string thumbnailUrl;
+        public string type;
+        public int width;
+        public int height;
     }
 
     /// <summary>

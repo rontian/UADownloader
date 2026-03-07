@@ -170,6 +170,21 @@ namespace UADownloader
                         Debug.LogWarning($"[AssetStoreAPI] uploads字段为null或为空 - {package.name}");
                     }
                     
+                    if (details.images != null && details.images.Length > 0)
+                    {
+                        package.images = details.images.Select(img => new ImageInfo
+                        {
+                            imageUrl = img.imageUrl,
+                            webpUrl = img.webpUrl,
+                            thumbnailUrl = img.thumbnailUrl,
+                            type = img.type,
+                            width = img.width,
+                            height = img.height
+                        }).ToArray();
+                        
+                        Debug.Log($"[AssetStoreAPI] 获取到 {package.images.Length} 张图片 - {package.name}");
+                    }
+                    
                     return true;
                 }
                 else
