@@ -32,6 +32,15 @@ namespace UADownloader
         public int revision;
         public string publishedDate;
         public ImageInfo[] images;
+        
+        // Asset Store链接与额外信息
+        public string storeUrl;
+        public string originPrice;
+        public string publisherId;
+        public string[] supportLinks;
+        public string elevatorPitch;
+        public string keyFeatures;
+        public string aiDescription;
     }
     
     /// <summary>

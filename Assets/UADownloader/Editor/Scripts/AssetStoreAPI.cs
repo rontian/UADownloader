@@ -141,6 +141,14 @@ namespace UADownloader
                     package.slug = details.slug;
                     package.revision = details.revision;
                     
+                    package.storeUrl = $"https://assetstore.unity.com/packages/slug/{package.id}";
+                    package.originPrice = details.originPrice;
+                    package.publisherId = details.publisherId;
+                    package.supportLinks = details.supportLinks;
+                    package.elevatorPitch = details.elevatorPitch;
+                    package.keyFeatures = details.keyFeatures;
+                    package.aiDescription = details.aiDescription;
+                    
                     if (details.mainImage != null)
                     {
                         package.mainImageIcon = details.mainImage.icon;
